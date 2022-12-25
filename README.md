@@ -91,7 +91,17 @@ function swapExactInputSingle(uint256 amountIn)
 
 들어온 token은 `DAI`, 나가는 token은 `WETH9`이 되고, fee는 컨트랙트에 선언된 `poolFee`이다.
 
+`deadline`은 장기 보류 트랜잭션 및 급격한 가격 변동으로부터 보호하기 위해 스왑이 실패하는 `UNIX`시간이다. 
+
 recipient(받는 사람)은 `msg.sender`에 해당하고, 들어온 양은 amountIn이다. 
+
+`amountOutMinimum`이 0으로 설정되어 있는데, 프로덕션에서는 위험하다. 
+
+실제 배포의 경우 이 값은 Uniswap SDK 혹은 온체인 price oracle을 통해 계산 과정을 거쳐야한다. 
+
+`sqrtPriceLimitX96` 값을 0으로 설정하여 이 매개변수를 비활성화했다. 
+
+프로덕션에서 이 값을 사용하여 스왑이 풀에 푸시할 가격 한도를 설정하여 가격 영향으로부터 보호하거나 다양한 가격 관련 메커니즘에서 논리를 설정하는 데 도움이 될 수 있다.
 
 ```solidity 
 function exactInputSingle(ExactInputSingleParams calldata params) external payable returns (uint256 amountOut);
