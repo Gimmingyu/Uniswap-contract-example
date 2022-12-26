@@ -40,18 +40,10 @@ constructor(ISwapRouter _swapRouter) {
 ### swapExactInputSingle
 
 ```solidity
-/// @notice swapExactInputSingle swaps a fixed amount of DAI for a maximum possible amount of WETH9
-/// using the DAI/WETH9 0.3% pool by calling `exactInputSingle` in the swap router.
-/// @dev The calling address must approve this contract to spend at least `amountIn` worth of its DAI for this function to succeed.
-/// @param amountIn The exact amount of DAI that will be swapped for WETH9.
-/// @return amountOut The amount of WETH9 received.
 function swapExactInputSingle(uint256 amountIn)
 	external
 	returns (uint256 amountOut)
 {
-	// msg.sender must approve this contract
-
-	// Transfer the specified amount of DAI to this contract.
 	TransferHelper.safeTransferFrom(
 		DAI,
 		msg.sender,
@@ -59,11 +51,8 @@ function swapExactInputSingle(uint256 amountIn)
 		amountIn
 	);
 
-	// Approve the router to spend DAI.
 	TransferHelper.safeApprove(DAI, address(swapRouter), amountIn);
 
-	// Naively set amountOutMinimum to 0. In production, use an oracle or other data source to choose a safer value for amountOutMinimum.
-	// We also set the sqrtPriceLimitx96 to be 0 to ensure we swap our exact input amount.
 	ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
 		.ExactInputSingleParams({
 			tokenIn: DAI,
@@ -76,7 +65,6 @@ function swapExactInputSingle(uint256 amountIn)
 			sqrtPriceLimitX96: 0
 		});
 
-	// The call to `exactInputSingle` executes the swap.
 	amountOut = swapRouter.exactInputSingle(params);
 }
 ```
@@ -111,11 +99,130 @@ Interface 상에서는 위와 같이 표현되어 있다.
 
 해당 함수를 구현하는 컨트랙트를 생성자로 받았기 때문에 ISwapRouter를 구현한 컨트랙트에서 실행이 될 것이다. 
 
-
-
 ## Multi swap contract
 
+SingleSwap 컨트랙트 역시 Uniswap docs에서 가져온 Full example이다. 
+
+마찬가지로 DAI, WETH9, USDC 컨트랙트의 주소를 하드코딩으로 선언해둔 것을 볼 수 있다. 
+
+`swapExactInputMultihop`과 `swapExactOutputMultihop`이 있다. 두 함수를 중점적으로 살펴보자.
+
+```solidity
+function swapExactInputMultihop(uint256 amountIn)
+        external
+        returns (uint256 amountOut)
+    {
+        TransferHelper.safeTransferFrom(
+            DAI,
+            msg.sender,
+            address(this),
+            amountIn
+        );
+
+        TransferHelper.safeApprove(DAI, address(swapRouter), amountIn);
+
+        ISwapRouter.ExactInputParams memory params = ISwapRouter
+            .ExactInputParams({
+                path: abi.encodePacked(DAI, poolFee, USDC, poolFee, WETH9),
+                recipient: msg.sender,
+                deadline: block.timestamp,
+                amountIn: amountIn,
+                amountOutMinimum: 0
+            });
+
+        amountOut = swapRouter.exactInput(params);
+    }
+```
+큰 골자는 `SingleSwap`과 일치한다. 
+
+`ExactInputParams`의 `path`가 주목해서 볼만한데, 해당 인자는 `tokenAddress`, `Fee`, `tokenAddress` 를 역순으로 인코딩한 시퀀스이다. 
+
+멀티홉 스왑 라우터는 이러한 변수가 있는 풀을 찾아서 풀 내에서 필요한 스왑을 순차적으로 실행한다.
+
 ## Providing liquidity 
+
+유동성 제공에 대한 컨트랙트 역시 Uniswap Docs를 참고했다. 
+
+```solidity
+address public constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
+address public constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+```
+
+마찬가지로 하드코딩된 DAI와 USDC.
+
+프로덕션 환경에서는 입력 매개변수를 받아 트랜잭션별로 상호작용하는 풀과 토큰을 변경하면 될 것이다. 
+
+```solidity
+INonfungiblePositionManager public immutable nonfungiblePositionManager;
+```
+
+`immutable`로 선언한 `INonfungiblePositionManager`가 보인다. 
+
+```solidity
+struct Deposit {
+	address owner;
+	uint128 liquidity;
+	address token0;
+	address token1;
+}
+```
+
+`Deposit` 구조체를 살펴보면 `owner address`와 `uint128`로 선언된 유동성, 그리고 `token0`과 `token1`의 주소가 들어가있다.
+
+자잘한건 전부 넘기고, 함수들을 위주로 살펴보자.
+
+```solidity
+function onERC721Received(
+	address operator,
+	address,
+	uint256 tokenId,
+	bytes calldata
+) external override returns (bytes4) {
+	// get position information
+
+	_createDeposit(operator, tokenId);
+
+	return this.onERC721Received.selector;
+}
+
+function _createDeposit(address owner, uint256 tokenId) internal {
+	(
+		,
+		,
+		address token0,
+		address token1,
+		,
+		,
+		,
+		uint128 liquidity,
+		,
+		,
+		,
+
+	) = nonfungiblePositionManager.positions(tokenId);
+
+	// set the owner and data for position
+	// operator is msg.sender
+	deposits[tokenId] = Deposit({
+		owner: owner,
+		liquidity: liquidity,
+		token0: token0,
+		token1: token1
+	});
+}
+```
+
+당황스러운 코드지만 천천히 살펴보자.
+
+`onERC721Received`는 단순히 컨트랙트가 ERC721 토큰을 보관하게 하도록 상속받은 함수이다. 
+
+중요한 것은 `_createDeposit` 함수일 것이다.
+
+`nonfungiblePositionManager.positions(tokenId)` 를 사용해서 필요한 정보를 받아온다. 
+
+`address token0`, `address token1`, `uint128 liquidity`가 그에 해당한다. 
+
+그리고 mapping 구조체에 `tokenId`를 key로 하는 `Deposit 구조체`를 삽입한다.
 
 ## Liquidity mining
 
