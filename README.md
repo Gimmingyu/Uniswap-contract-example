@@ -224,7 +224,105 @@ function _createDeposit(address owner, uint256 tokenId) internal {
 
 그리고 mapping 구조체에 `tokenId`를 key로 하는 `Deposit 구조체`를 삽입한다.
 
+그 다음 주목할만한 함수는 `mintNewPosition`이다. 
+
+```solidity
+function mintNewPosition()
+        external
+        returns (
+            uint256 tokenId,
+            uint128 liquidity,
+            uint256 amount0,
+            uint256 amount1
+        )
+{
+	// For this example, we will provide equal amounts of liquidity in both assets.
+	// Providing liquidity in both assets means liquidity will be earning fees and is considered in-range.
+	uint256 amount0ToMint = 1000;
+	uint256 amount1ToMint = 1000;
+
+	// Approve the position manager
+	TransferHelper.safeApprove(
+		DAI,
+		address(nonfungiblePositionManager),
+		amount0ToMint
+	);
+	TransferHelper.safeApprove(
+		USDC,
+		address(nonfungiblePositionManager),
+		amount1ToMint
+	);
+
+	INonfungiblePositionManager.MintParams
+		memory params = INonfungiblePositionManager.MintParams({
+			token0: DAI,
+			token1: USDC,
+			fee: poolFee,
+			tickLower: TickMath.MIN_TICK,
+			tickUpper: TickMath.MAX_TICK,
+			amount0Desired: amount0ToMint,
+			amount1Desired: amount1ToMint,
+			amount0Min: 0,
+			amount1Min: 0,
+			recipient: address(this),
+			deadline: block.timestamp
+		});
+
+	// Note that the pool defined by DAI/USDC and fee tier 0.3% must already be created and initialized in order to mint
+	(tokenId, liquidity, amount0, amount1) = nonfungiblePositionManager
+		.mint(params);
+
+	// Create a deposit
+	_createDeposit(msg.sender, tokenId);
+
+	// Remove allowance and refund in both assets.
+	if (amount0 < amount0ToMint) {
+		TransferHelper.safeApprove(
+			DAI,
+			address(nonfungiblePositionManager),
+			0
+		);
+		uint256 refund0 = amount0ToMint - amount0;
+		TransferHelper.safeTransfer(DAI, msg.sender, refund0);
+	}
+
+	if (amount1 < amount1ToMint) {
+		TransferHelper.safeApprove(
+			USDC,
+			address(nonfungiblePositionManager),
+			0
+		);
+		uint256 refund1 = amount1ToMint - amount1;
+		TransferHelper.safeTransfer(USDC, msg.sender, refund1);
+	}
+}
+```
+
+새로운 포지션을 민트해주는 함수이다. 
+
+`amount0ToMint`와 `amount1ToMint`를 보면 1000개로 예시를 위해 하드코딩이 되어있다.
+
+실제 예시에서는 당연히 개수가 다를 것이다. 
+
+또한 두 자산 모두에 유동성을 제공한다는 것은 수수료를 가져다 줄 것이며, 현재 어떤 범위 내에 있다는 것을 의미한다.
+
+그 밑을 보면 `safeApprove`를 사용해서 `nonfungiblePositionManager`가 토큰을 사용하도록 승인하고, `MintParams`를 만들어서 민팅한다. 
+
+`tickLower`와 `tickUpper`가 있는데, 이는 범위에 대한 tick을 말하는 것 같다. 
+
+`MIN_TICK`과 `MAX_TICK`이 적용되어 있으므로 풀의 전체 범위에 걸쳐 유동성을 제공하고 있다고 보면 된다. 
+
+프로덕션에서는 위치를 조정할 수 있을 것이다. 
+
+`amount0Min`, `amount1Min`이 있는데, 0으로 초기화된 모습을 볼 수 있다.
+
+실제로 프로덕션에서 이와 같이 코드를 짜면 슬리피지에 매우 취약할 수 있다.
+
+그 밑은 mapping 구조체에 입력하고 transfer 해주는 과정이므로 생략!
+
 ## Liquidity mining
+
+
 
 ## Flash swaps
 
